@@ -31,10 +31,6 @@ Each side question runs in an in-memory pi sub-session seeded (in contextual mod
 
 Cancelling or clearing BTW aborts only the sub-session; it never touches the main agent's turn.
 
-## Prior art
-
-Synthesizes ideas from [noahsaso's original btw](https://github.com/noahsaso/my-pi) (widget, persistence), [dbachelder/pi-btw](https://github.com/dbachelder/pi-btw) (sub-session, tangent, overrides, `--save`), [williamyangcn/pi-btw](https://github.com/williamyangcn/pi-btw) (read-only tools, journal seeding), and [@linioi/pi-btw](https://www.npmjs.com/package/@linioi/pi-btw) (abort-safety). Thanks to all four authors.
-
 ## Development
 
 ```bash
