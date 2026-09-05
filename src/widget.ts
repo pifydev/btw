@@ -3,6 +3,8 @@ import type { BtwSlot, ThemeLike, WidgetState } from "./types.ts";
 const WIDTH = 54;
 /** At most this many exchanges render in full; older ones only count in the header. */
 const MAX_VISIBLE_SLOTS = 3;
+/** Finished answers longer than this truncate with a hand-off hint (v0.2). */
+const MAX_ANSWER_LINES = 12;
 const CURSOR = " ▍";
 
 /**
@@ -76,10 +78,21 @@ function renderSlot(slot: BtwSlot, lines: string[], p: Painters): void {
   }
 
   if (slot.answer) {
-    const answerLines = slot.answer.split("\n");
+    // Streaming answers stay untruncated (the tail is what matters while it
+    // grows); finished long answers collapse so the widget never swallows
+    // the editor — the full text is one /btw:inject away.
+    let answerLines = slot.answer.split("\n");
+    let truncated = 0;
+    if (slot.done && answerLines.length > MAX_ANSWER_LINES) {
+      truncated = answerLines.length - MAX_ANSWER_LINES;
+      answerLines = answerLines.slice(0, MAX_ANSWER_LINES);
+    }
     lines.push(p.dim("│ ") + answerLines[0]);
     if (answerLines.length > 1) {
       lines.push(answerLines.slice(1).join("\n"));
+    }
+    if (truncated > 0) {
+      lines.push(p.dim(`│ … +${truncated} more lines — /btw:inject to hand the full thread to the main agent`));
     }
     if (!slot.done) {
       lines[lines.length - 1] += p.warning(CURSOR);

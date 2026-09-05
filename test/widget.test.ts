@@ -134,3 +134,19 @@ test("multi-line answers keep the border only on the first line", () => {
   assert.ok(text.includes("│ line1"));
   assert.ok(text.includes("line2\nline3"));
 });
+
+test("long finished answers truncate with a hand-off hint; streaming does not", () => {
+  const long = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+  const done = buildWidgetLines(
+    state({ slots: [slot({ answer: long, done: true })] }),
+    theme,
+  ).join("\n");
+  assert.ok(done.includes("line 12"));
+  assert.ok(!done.includes("line 13"));
+  assert.ok(done.includes("+8 more lines"));
+  assert.ok(done.includes("/btw:inject"));
+
+  const streaming = buildWidgetLines(state({ slots: [slot({ answer: long })] }), theme).join("\n");
+  assert.ok(streaming.includes("line 20"));
+  assert.ok(!streaming.includes("more lines —"));
+});
