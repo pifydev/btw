@@ -8,6 +8,7 @@ Part of the [Pify suite](https://github.com/pifydev). Install with [`pify instal
 
 - `/btw` opens a parallel side conversation that streams into a widget above the editor — it works while the main agent is busy.
 - The side agent is a **real pi sub-session with read-only tools** (`read`, `grep`, `find`, `ls`): it answers from the code, not just the transcript, and can never run commands or modify files.
+- **Honest about what it cannot do** (v0.3): a model with no write tool will sometimes narrate the edit anyway, or print tool-call JSON as text — nothing happens on disk, but the widget reads as though it did, and `/btw:summarize` would carry that fiction into the main session. Emitted tool-call syntax is stripped, answers that still claim a change get a `read-only side conversation: nothing was changed` footer, and the summarizer is told to describe proposals as proposals.
 - The side thread stays **out of the main agent's LLM context** and survives `/reload` and restarts.
 - `/btw:inject` / `/btw:summarize` hand the side thread (or a summary) back to the main agent when you're ready to act on it.
 - `/btw:model` and `/btw:thinking` run side questions on a cheaper model or lower thinking level than the main thread.

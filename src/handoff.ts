@@ -28,6 +28,11 @@ export function buildSummaryContent(summary: string, instructions: string): stri
 export function buildSummarizePrompt(thread: BtwDetails[]): string {
   return [
     "Summarize this side conversation concisely. Preserve key decisions, plans, insights, and action items.",
+    // The side agent has no write tools, so anything in the thread that reads
+    // like a completed change is the model narrating something that never
+    // happened. A summary must not pass that on to the main agent as fact.
+    "The side conversation could not modify anything: describe proposals as proposals, and never state",
+    "that a file was edited, created or run.",
     "Output only the summary, no preamble.",
     "",
     "<btw-thread>",

@@ -40,6 +40,7 @@ import {
   BTW_THINKING_OVERRIDE,
   replayBranch,
 } from "../src/persistence.ts";
+import { sanitizeAnswer } from "../src/sanitize.ts";
 import { buildSeedMessages } from "../src/seed.ts";
 import type {
   BtwDetails,
@@ -58,8 +59,12 @@ const BTW_SYSTEM_PROMPT = [
   "If main-session messages are present, they are context only — that work is being handled by another agent.",
   "Focus on answering the user's side questions, helping them think through ideas, or planning next steps.",
   "Do not act as if you need to complete or continue the main session's work.",
-  "You have read-only tools (read, grep, find, ls). You may inspect the codebase to answer accurately,",
-  "but you cannot run commands or modify files — never promise to make changes.",
+  "You have exactly four tools: read, grep, find and ls. There is no edit, write or bash tool in this",
+  "session and you cannot obtain one. Inspect the codebase freely to answer accurately.",
+  "When asked to change something, say plainly that you cannot edit files from a side conversation,",
+  "then describe the change you would make — the user can hand it to the main agent with /btw:inject.",
+  "Never say or imply that you have edited, created, updated or run anything, and never write tool-call",
+  "syntax as text: nothing you write here touches the repository.",
 ].join(" ");
 
 const BTW_SUMMARIZE_SYSTEM_PROMPT =
@@ -305,7 +310,11 @@ export default function btw(pi: ExtensionAPI) {
       if (part.type === "text" && typeof part.text === "string") answer += part.text;
       if (part.type === "thinking" && typeof part.thinking === "string") thinking += part.thinking;
     }
-    return { answer: answer.trim(), thinking: thinking.trim(), stopReason: last.stopReason };
+    return {
+      answer: sanitizeAnswer(answer),
+      thinking: thinking.trim(),
+      stopReason: last.stopReason,
+    };
   }
 
   async function runBtw(
