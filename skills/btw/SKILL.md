@@ -1,6 +1,6 @@
 ---
 name: btw
-description: Use when the user wants to explore a side question, clarify something, or think through an idea WITHOUT interrupting or derailing the main agent's current work - suggests the /btw side-conversation workflow (read-only side agent, /btw:inject to bring conclusions back)
+description: Use when the user wants to explore a side question, clarify something, or think through an idea WITHOUT interrupting or derailing the main agent's current work
 ---
 
 # BTW side conversations
