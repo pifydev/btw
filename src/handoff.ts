@@ -1,5 +1,17 @@
 import type { BtwDetails } from "./types.ts";
 
+/**
+ * Injected thread text is data, and it travels inside a tagged block that
+ * says so. A literal closing tag inside the thread would end the block early
+ * and everything after it would arrive looking like this extension's own
+ * framing rather than like quoted conversation — the same failure memory's
+ * neutralizeBlockTags exists for, and a side thread can quote anything,
+ * including text from a repository that wrote a closing tag on purpose.
+ */
+function neutralizeTags(text: string, tag: string): string {
+  return text.replaceAll(new RegExp(`<(/?)${tag}(\\s[^>]*)?>`, "gi"), "&lt;$1" + tag + "$2&gt;");
+}
+
 /** Format the thread as User/Assistant exchanges (noahsaso format). */
 export function formatThread(thread: BtwDetails[]): string {
   return thread
@@ -13,7 +25,7 @@ export function buildInjectContent(thread: BtwDetails[], instructions: string): 
   const lead = instructions
     ? `Here's a side conversation I had. ${instructions}`
     : "Here's a side conversation I had for additional context:";
-  return `${lead}\n\n<btw-thread>\n${threadText}\n</btw-thread>`;
+  return `${lead}\n\n<btw-thread>\n${neutralizeTags(threadText, "btw-thread")}\n</btw-thread>`;
 }
 
 /** Content for /btw:summarize delivery — summary in <btw-summary> tags. */
@@ -21,7 +33,7 @@ export function buildSummaryContent(summary: string, instructions: string): stri
   const lead = instructions
     ? `Here's a summary of a side conversation I had. ${instructions}`
     : "Here's a summary of a side conversation I had:";
-  return `${lead}\n\n<btw-summary>\n${summary.trim()}\n</btw-summary>`;
+  return `${lead}\n\n<btw-summary>\n${neutralizeTags(summary.trim(), "btw-summary")}\n</btw-summary>`;
 }
 
 /** The prompt sent to the one-off summarizer session. */
@@ -36,7 +48,7 @@ export function buildSummarizePrompt(thread: BtwDetails[]): string {
     "Output only the summary, no preamble.",
     "",
     "<btw-thread>",
-    formatThread(thread),
+    neutralizeTags(formatThread(thread), "btw-thread"),
     "</btw-thread>",
   ].join("\n");
 }

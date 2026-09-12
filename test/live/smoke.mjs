@@ -137,7 +137,7 @@ afterHandoff.entries.push(...host.entries);
 await afterHandoff.fire("session_start");
 check("a handed-over thread comes back empty", afterHandoff.widget("btw") === null);
 
-rmSync(repo, { recursive: true, force: true });
+rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 const passed = results.filter(Boolean).length;
 console.log(`\n${passed}/${results.length} live checks passed`);
 process.exitCode = passed === results.length ? 0 : 1;
