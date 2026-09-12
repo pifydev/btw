@@ -123,9 +123,16 @@ export default function btw(pi: ExtensionAPI) {
 
   // ── Sub-session lifecycle ────────────────────────────────────────────
 
-  function makeResourceLoader(ctx: ExtensionCommandContext, extraAppend: string[] = []) {
+  /**
+   * `reload()` is not optional. `createAgentSession` only loads a resource
+   * loader it builds itself; one passed in is used exactly as handed over,
+   * and a fresh DefaultResourceLoader resolves neither `systemPrompt` nor
+   * `appendSystemPrompt` until it loads — so the child would run with no
+   * instructions at all, and nothing would error to say so.
+   */
+  async function makeResourceLoader(ctx: ExtensionCommandContext, extraAppend: string[] = []) {
     const promptOptions = ctx.getSystemPromptOptions();
-    return new DefaultResourceLoader({
+    const loader = new DefaultResourceLoader({
       cwd: ctx.cwd,
       agentDir: getAgentDir(),
       // Never load extensions recursively (a btw inside a btw); keep the
@@ -140,6 +147,8 @@ export default function btw(pi: ExtensionAPI) {
         ...extraAppend,
       ],
     });
+    await loader.reload();
+    return loader;
   }
 
   interface ResolvedSettings {
@@ -270,7 +279,7 @@ export default function btw(pi: ExtensionAPI) {
       model: settings.model,
       thinkingLevel: settings.thinkingLevel as never,
       tools: READ_ONLY_TOOLS,
-      resourceLoader: makeResourceLoader(ctx),
+      resourceLoader: await makeResourceLoader(ctx),
     });
 
     const unsubscribe = session.subscribe(handleSessionEvent);
@@ -548,7 +557,7 @@ export default function btw(pi: ExtensionAPI) {
           model: settings.model,
           thinkingLevel: "off" as never,
           tools: [],
-          resourceLoader: makeResourceLoader(ctx, [BTW_SUMMARIZE_SYSTEM_PROMPT]),
+          resourceLoader: await makeResourceLoader(ctx, [BTW_SUMMARIZE_SYSTEM_PROMPT]),
         });
         summarizer = created.session;
         await summarizer.prompt(buildSummarizePrompt(pendingThread), {

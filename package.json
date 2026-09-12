@@ -1,6 +1,6 @@
 {
   "name": "@pify/btw",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "By-the-way side conversations for pi: a read-only, codebase-aware side agent in a widget, without derailing the main session",
   "keywords": [
     "pi-package",
