@@ -1,5 +1,7 @@
 # @pify/btw
 
+[![npm version](https://img.shields.io/npm/v/@pify/btw)](https://www.npmjs.com/package/@pify/btw) [![npm downloads](https://img.shields.io/npm/dm/@pify/btw)](https://www.npmjs.com/package/@pify/btw)
+
 By-the-way side conversations for [pi](https://github.com/earendil-works/pi): ask a **read-only, codebase-aware side agent** anything while the main agent keeps working — without derailing the session or polluting its context.
 
 Part of the [Pify suite](https://github.com/pifydev). Install with [`pify install btw`](https://github.com/pifydev/cli) or `pi install npm:@pify/btw`.
