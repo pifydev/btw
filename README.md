@@ -1,6 +1,6 @@
 # @pify/btw
 
-[![npm version](https://img.shields.io/npm/v/@pify/btw)](https://www.npmjs.com/package/@pify/btw) [![npm downloads](https://img.shields.io/npm/dm/@pify/btw)](https://www.npmjs.com/package/@pify/btw)
+[![CI](https://github.com/pifydev/btw/actions/workflows/ci.yml/badge.svg)](https://github.com/pifydev/btw/actions/workflows/ci.yml) [![npm version](https://img.shields.io/npm/v/@pify/btw)](https://www.npmjs.com/package/@pify/btw) [![npm downloads](https://img.shields.io/npm/dm/@pify/btw)](https://www.npmjs.com/package/@pify/btw)
 
 By-the-way side conversations for [pi](https://github.com/earendil-works/pi): ask a **read-only, codebase-aware side agent** anything while the main agent keeps working — without derailing the session or polluting its context.
 
