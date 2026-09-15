@@ -26,6 +26,7 @@ import {
 import { Text } from "@earendil-works/pi-tui";
 
 import { parseBtwArgs, parseModelArgs, parseThinkingArgs } from "../src/args.ts";
+import { isActiveSession } from "../src/guards.ts";
 import {
   buildInjectContent,
   buildSaveNote,
@@ -336,30 +337,43 @@ export default function btw(pi: ExtensionAPI) {
       notify(ctx, "BTW is busy — wait for the current answer or /btw:clear", "warning");
       return;
     }
-    if (mode !== askMode) {
-      // Switching between contextual and tangent clears the thread (dbachelder).
-      resetThread(ctx, askMode);
-    }
-
-    const settings = await resolveSettings(ctx);
-    if (!settings) {
-      notify(ctx, "No model selected", "error");
-      return;
-    }
-    if (settings.overrideFellBack) {
-      notify(ctx, `btw: ${settings.overrideFellBack} — using the main model`, "warning");
-    }
-
-    const slot: BtwSlot = { question, thinking: "", answer: "", toolLine: null, done: false };
-    slots.push(slot);
-    renderWidget(ctx);
+    // Claim the in-flight slot BEFORE the first await (resolveSettings): the
+    // guard above and this set must be atomic, or two rapid /btw commands both
+    // pass the check and start concurrently.
     inFlight = true;
 
+    let slot: BtwSlot | null = null;
     try {
-      const session = await ensureSession(ctx, settings);
-      await session.prompt(question, { source: "extension" } as never);
+      if (mode !== askMode) {
+        // Switching between contextual and tangent clears the thread (dbachelder).
+        resetThread(ctx, askMode);
+      }
 
-      const result = contentText(session);
+      const settings = await resolveSettings(ctx);
+      if (!settings) {
+        notify(ctx, "No model selected", "error");
+        return;
+      }
+      if (settings.overrideFellBack) {
+        notify(ctx, `btw: ${settings.overrideFellBack} — using the main model`, "warning");
+      }
+
+      slot = { question, thinking: "", answer: "", toolLine: null, done: false };
+      slots.push(slot);
+      renderWidget(ctx);
+
+      // Capture the session locally: a mid-prompt /btw clear|new|model|thinking|
+      // inject calls disposeSession (active=null) or replaces the active
+      // session, so `active` can change out from under us across the await.
+      const s = await ensureSession(ctx, settings);
+      await s.prompt(question, { source: "extension" } as never);
+
+      // Bail before any finalizing mutation if the thread is gone: writing the
+      // slot, pendingThread, or the btw-exchange entry would resurrect a thread
+      // the user has already cleared.
+      if (!isActiveSession(active, s)) return;
+
+      const result = contentText(s);
       if (result.stopReason === "aborted") {
         slots.pop();
         renderWidget(ctx);
@@ -400,9 +414,11 @@ export default function btw(pi: ExtensionAPI) {
         notify(ctx, ctx.isIdle() ? "btw: note saved to session" : "btw: note queued", "info");
       }
     } catch (err) {
-      slot.error = err instanceof Error ? err.message : String(err);
-      slot.done = true;
-      renderWidget(ctx);
+      if (slot) {
+        slot.error = err instanceof Error ? err.message : String(err);
+        slot.done = true;
+        renderWidget(ctx);
+      }
       disposeSession();
     } finally {
       inFlight = false;

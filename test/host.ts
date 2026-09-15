@@ -120,7 +120,9 @@ export class StubHost {
       scopedModels: [],
       thinkingLevel: this.thinkingLevel,
       waitForIdle: async () => {},
-      model: this.opts.model ?? { id: "gpt-5.5", provider: "openai" },
+      // Honor an explicit `model: null` (no model selected); only default when
+      // the caller never mentioned a model at all.
+      model: "model" in this.opts ? this.opts.model : { id: "gpt-5.5", provider: "openai" },
       modelRegistry: {
         find: (provider: string, id: string) => registry[`${provider}/${id}`],
         getApiKeyAndHeaders: async (model: StubModel) =>

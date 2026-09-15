@@ -36,6 +36,22 @@ test("every documented command is registered", () => {
   );
 });
 
+test("two rapid /btw commands do not both start — the second is turned away", async () => {
+  // With no model, runBtw returns early after awaiting resolveSettings without
+  // ever reaching the sub-session, so this stays model-free. The in-flight
+  // guard must be claimed BEFORE that await; otherwise both commands slip past
+  // the busy check and start concurrently.
+  const host = load({ model: null });
+  await host.fire("session_start");
+
+  const first = host.run("btw", "first question");
+  const second = host.run("btw", "second question");
+  await Promise.all([first, second]);
+
+  const busy = host.notifications().filter((n) => /busy/i.test(n));
+  assert.equal(busy.length, 1, host.notifications().join(" | "));
+});
+
 test("/reload rehydrates the thread and the widget from session entries", async () => {
   const host = load();
   host.entries.push(exchange("what does this repo do?", "It parses CLI flags."));
