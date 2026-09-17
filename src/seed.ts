@@ -1,4 +1,3 @@
-import { BTW_NOTE } from "./persistence.ts";
 import type { BtwDetails, BtwMode, LooseMessage } from "./types.ts";
 
 const CONTINUATION_USER =
@@ -38,22 +37,24 @@ function assistantMessage(text: string, model: SeedModelRef): LooseMessage {
 
 /**
  * Prepare the main-session messages for seeding a contextual btw sub-session:
- * - drop visible btw-note custom messages (the side channel must not see its
- *   own saved notes twice), and
- * - drop a trailing in-progress assistant message (stopReason missing) so a
- *   fork mid-stream never sees a truncated response (linioi).
+ * drop a trailing in-progress assistant message (stopReason missing) so a fork
+ * mid-stream never sees a truncated response (linioi).
+ *
+ * Saved btw-note messages are NOT filtered here: by the time convertToLlm has
+ * run (in the extension, before this) a custom note is an ordinary user message
+ * with no customType, so it must be filtered on the pre-conversion AgentMessage
+ * list instead — see extensions/btw.ts ensureSession.
  */
 export function sanitizeMainMessages(messages: LooseMessage[]): LooseMessage[] {
-  const filtered = messages.filter((m) => m.customType !== BTW_NOTE);
-  const last = filtered[filtered.length - 1];
+  const last = messages[messages.length - 1];
   if (
     last &&
     last.role === "assistant" &&
     (last.stopReason === undefined || last.stopReason === null)
   ) {
-    return filtered.slice(0, -1);
+    return messages.slice(0, -1);
   }
-  return filtered;
+  return messages;
 }
 
 /**

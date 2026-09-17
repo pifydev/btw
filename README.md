@@ -16,12 +16,12 @@ A side conversation answers the question somewhere else. It reads the same codeb
 
 | Command | Description |
 |---|---|
-| `/btw [--save] <question>` | Ask in the current side thread, which inherits the main session's context. `--save` also writes the exchange as a visible session note. |
+| `/btw [--save] <question>` | Ask in the current side thread, which inherits the main session's context. `--save` also writes the exchange as a visible session note — saved silently, never provoking a main-agent turn even mid-task. |
 | `/btw:new [question]` | Start a fresh side thread. |
 | `/btw:tangent [--save] <question>` | A contextless side thread — no main-session context, fresh perspective. Switching between `/btw` and `/btw:tangent` clears the thread. |
 | `/btw:clear` | Dismiss the widget and clear the thread. |
 | `/btw:inject [instructions]` | Send the full thread to the main agent — queued as a follow-up if it is busy — then reset. |
-| `/btw:summarize [instructions]` | Summarise the thread with a model, send the summary to the main agent, then reset. |
+| `/btw:summarize [instructions]` | Summarise the thread with a model, send the summary to the main agent, then reset. Refused while a side answer or another summarize is still running. |
 | `/btw:model [<provider> <model> <api> \| clear]` | Show or set a BTW-only model override. |
 | `/btw:thinking [off\|minimal\|low\|medium\|high\|xhigh\|max \| clear]` | Show or set a BTW-only thinking override. |
 
@@ -31,9 +31,11 @@ Each side question runs in an in-memory pi sub-session, seeded in contextual mod
 
 Answers stream into a widget above the editor, and it works while the main agent is busy.
 
-Completed exchanges are persisted as hidden custom entries in the session file: visible to you in the widget, invisible to the main agent, and rebuilt into a thread on restart. Model and thinking overrides are persisted per session the same way.
+Completed exchanges are persisted as hidden custom entries in the session file: visible to you in the widget, invisible to the main agent, and rebuilt into a thread on restart. Model and thinking overrides are persisted per session the same way. A saved `--save` note is never fed back into a later side session either — the side agent does not re-read its own notes.
 
-Cancelling or clearing BTW aborts only the sub-session. It never touches the main agent's turn.
+The widget shows a reasoning model's thinking only while it streams (just the tail), then collapses it to a `💭 thought N lines` marker once the answer lands, so a long reasoning block never pushes the editor off-screen.
+
+Cancelling or clearing BTW aborts only the sub-session. It never touches the main agent's turn. Changing the model or thinking level mid-answer cancels the in-flight side question (it is not persisted) and tells you so; finished exchanges stay.
 
 ## Honest about what it cannot do
 

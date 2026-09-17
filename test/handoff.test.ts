@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import {
   buildInjectContent,
   buildSaveNote,
+  buildSaveNoteDelivery,
   buildSummarizePrompt,
   buildSummaryContent,
   formatThread,
 } from "../src/handoff.ts";
+import { BTW_NOTE } from "../src/persistence.ts";
 import type { BtwDetails } from "../src/types.ts";
 
 function exchange(question: string, answer: string): BtwDetails {
@@ -58,6 +60,18 @@ test("buildSummarizePrompt embeds the formatted thread", () => {
 
 test("buildSaveNote formats a Q/A note", () => {
   assert.equal(buildSaveNote(exchange(" q ", " a ")), "Q: q\n\nA: a");
+});
+
+test("buildSaveNoteDelivery always sends with triggerTurn:false so --save never provokes a main turn", () => {
+  const { message, options } = buildSaveNoteDelivery(exchange("q", "a"));
+  // triggerTurn:false is the whole point: with deliverAs:"followUp" alone, a
+  // note saved while the main agent streams enqueues an agent follow-up that
+  // fires an unprompted extra LLM turn on the main session.
+  assert.equal(options.triggerTurn, false);
+  assert.equal(options.deliverAs, "followUp");
+  assert.equal(message.customType, BTW_NOTE);
+  assert.equal(message.content, "Q: q\n\nA: a");
+  assert.equal(message.display, true);
 });
 
 test("a closing tag inside the thread cannot end the block early", () => {

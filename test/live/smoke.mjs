@@ -91,6 +91,11 @@ await host.run("btw", "--save one sentence: what does parseFlags return?");
 const notes = host.sent.filter((m) => m.customType === BTW_NOTE);
 check("a visible note was written", notes.length === 1);
 check("the note is displayed to the user", notes[0]?.display === true);
+check(
+  "the note never provokes a main-agent turn (triggerTurn:false)",
+  notes[0]?.options?.triggerTurn === false,
+  JSON.stringify(notes[0]?.options),
+);
 check("nothing was handed to the main agent as a prompt", host.userMessages.length === 0);
 
 // Snapshot before the summarize step, which resets the thread by design.

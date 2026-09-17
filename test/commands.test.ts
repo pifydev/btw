@@ -127,6 +127,43 @@ test("/btw:model reports, sets, persists, and reverts", async () => {
   assert.match(host.notifications().at(-1)!, /inherits main thread/);
 });
 
+test("/btw:model on a finished thread does not report a cancellation or lose the exchange", async () => {
+  // The mid-answer orphan cleanup (cancelInFlightSlots) must only fire on an
+  // unfinished slot: a restored, all-done thread has nothing in flight, so an
+  // override change keeps every exchange and stays silent about cancellation.
+  const host = load({
+    model: { id: "gpt-5.5", provider: "openai" },
+    registry: { "anthropic/claude-haiku-4-5-20251001": { id: "claude-haiku-4-5-20251001", provider: "anthropic" } },
+  });
+  host.entries.push(exchange("what does this do?", "it parses flags"));
+  await host.fire("session_start");
+
+  await host.run("btw:model", "anthropic claude-haiku-4-5-20251001 anthropic-messages");
+  assert.ok(!host.notifications().some((n) => /cancelled/i.test(n)), host.notifications().join(" | "));
+  assert.ok(host.widgetText("btw").includes("parses flags"));
+
+  await host.run("btw:thinking", "low");
+  assert.ok(!host.notifications().some((n) => /cancelled/i.test(n)), host.notifications().join(" | "));
+  assert.ok(host.widgetText("btw").includes("parses flags"));
+});
+
+test("/btw:summarize refuses while another summarize is already in flight", async () => {
+  // model:null → the first summarize claims inFlight, awaits resolveSettings,
+  // and bails with "No model selected" (never reaching a live sub-session). The
+  // second, fired in the same tick, must see the claim and be turned away —
+  // otherwise two summaries reach the main agent.
+  const host = load({ model: null });
+  host.entries.push(exchange("q", "a"));
+  await host.fire("session_start");
+
+  const first = host.run("btw:summarize");
+  const second = host.run("btw:summarize");
+  await Promise.all([first, second]);
+
+  const busy = host.notifications().filter((n) => /busy/i.test(n));
+  assert.equal(busy.length, 1, host.notifications().join(" | "));
+});
+
 test("/btw:thinking persists across a reload", async () => {
   const host = load();
   await host.run("btw:thinking", "low");

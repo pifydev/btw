@@ -1,3 +1,4 @@
+import { BTW_NOTE } from "./persistence.ts";
 import type { BtwDetails } from "./types.ts";
 
 /**
@@ -56,4 +57,30 @@ export function buildSummarizePrompt(thread: BtwDetails[]): string {
 /** Visible session note content for a single --save exchange. */
 export function buildSaveNote(d: BtwDetails): string {
   return `Q: ${d.question.trim()}\n\nA: ${d.answer.trim()}`;
+}
+
+export interface SaveNoteDelivery {
+  message: { customType: string; content: string; display: true; details: BtwDetails };
+  options: { deliverAs: "followUp"; triggerTurn: false };
+}
+
+/**
+ * Build the --save note message and its pi.sendMessage options.
+ *
+ * The options ALWAYS carry `triggerTurn: false`. When the main agent is
+ * streaming, a custom note sent with `deliverAs: "followUp"` but no
+ * `triggerTurn: false` reaches the branch in agent-session's sendCustomMessage
+ * that calls `agent.followUp`, which the loop drains after the current turn with
+ * a fresh model call on the MAIN session — and the extension's own context hook
+ * then strips the note, so the user pays for a full-context request that adds
+ * nothing and gets an unprompted assistant continuation. `triggerTurn: false`
+ * instead lands the note in `_pendingCustomMessages`, appended after the turn
+ * with no model call (and appended directly when the agent is idle), which is
+ * exactly the "save silently" behavior --save promises.
+ */
+export function buildSaveNoteDelivery(d: BtwDetails): SaveNoteDelivery {
+  return {
+    message: { customType: BTW_NOTE, content: buildSaveNote(d), display: true, details: d },
+    options: { deliverAs: "followUp", triggerTurn: false },
+  };
 }

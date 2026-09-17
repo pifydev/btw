@@ -78,14 +78,3 @@ test("sanitize keeps completed trailing assistant message", () => {
   ];
   assert.equal(sanitizeMainMessages(messages).length, 1);
 });
-
-test("sanitize drops btw-note custom messages anywhere", () => {
-  const messages: LooseMessage[] = [
-    { role: "user", content: [{ type: "text", text: "u" }] },
-    { role: "user", customType: "btw-note", content: [{ type: "text", text: "note" }] },
-    { role: "assistant", content: [{ type: "text", text: "a" }], stopReason: "stop" },
-  ];
-  const out = sanitizeMainMessages(messages);
-  assert.equal(out.length, 2);
-  assert.ok(out.every((m) => m.customType !== "btw-note"));
-});

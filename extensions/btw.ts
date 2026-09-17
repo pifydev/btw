@@ -29,7 +29,7 @@ import { parseBtwArgs, parseModelArgs, parseThinkingArgs } from "../src/args.ts"
 import { isActiveSession } from "../src/guards.ts";
 import {
   buildInjectContent,
-  buildSaveNote,
+  buildSaveNoteDelivery,
   buildSummarizePrompt,
   buildSummaryContent,
 } from "../src/handoff.ts";
@@ -54,6 +54,9 @@ import type {
 import { buildWidgetLines } from "../src/widget.ts";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
+
+/** Persisted (and reload-replayed) thinking is capped here; nothing reads it. */
+const MAX_THINKING_CHARS = 500;
 
 const BTW_SYSTEM_PROMPT = [
   "You are having an aside conversation with the user, separate from their main working session.",
@@ -205,6 +208,20 @@ export default function btw(pi: ExtensionAPI) {
     })();
   }
 
+  /**
+   * Drop any still-streaming slot after its sub-session was disposed out from
+   * under it (a /btw:model or /btw:thinking change mid-answer). runBtw's
+   * post-await identity guard returns without touching `slots`, so without this
+   * the widget would keep drawing a blinking cursor on an answer that will never
+   * arrive. Unlike resetThread, the override handlers keep finished exchanges.
+   */
+  function cancelInFlightSlots(ctx: UiContext): void {
+    if (slots.some((s) => !s.done)) {
+      slots = slots.filter((s) => s.done);
+      notify(ctx, "btw: in-flight answer cancelled", "info");
+    }
+  }
+
   function handleSessionEvent(event: AgentSessionEvent): void {
     const slot = slots[slots.length - 1];
     if (!slot || slot.done) return;
@@ -258,8 +275,15 @@ export default function btw(pi: ExtensionAPI) {
     const mainMessages =
       mode === "contextual"
         ? (convertToLlm(
+            // Drop saved --save notes BEFORE conversion: convertToLlm maps
+            // role "custom" to a plain user message and does not copy customType
+            // (messages.js ~89-95), so a filter run on the converted output can
+            // never match — every contextual side session would otherwise be
+            // seeded with the side channel's own prior notes.
             buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId())
-              .messages,
+              .messages.filter(
+                (m) => (m as { customType?: string }).customType !== BTW_NOTE,
+              ),
           ) as unknown as LooseMessage[])
         : [];
     const seed = buildSeedMessages(mainMessages, pendingThread, mode, {
@@ -387,14 +411,19 @@ export default function btw(pi: ExtensionAPI) {
         return;
       }
 
-      slot.thinking = result.thinking;
+      // Cap thinking before it is stored or persisted: no consumer (seed,
+      // inject, summarize, --save) reads it, the widget collapses a done slot's
+      // thinking to a one-line marker, and the full block would otherwise be
+      // written to every btw-exchange entry and replayed on each reload.
+      const thinking = result.thinking.slice(0, MAX_THINKING_CHARS);
+      slot.thinking = thinking;
       slot.answer = result.answer;
       slot.done = true;
       renderWidget(ctx);
 
       const details: BtwDetails = {
         question,
-        thinking: result.thinking,
+        thinking,
         answer: result.answer,
         provider: settings.model.provider,
         model: settings.model.id,
@@ -406,11 +435,10 @@ export default function btw(pi: ExtensionAPI) {
       pi.appendEntry(BTW_EXCHANGE, details);
 
       if (save) {
-        const options = ctx.isIdle() ? undefined : ({ deliverAs: "followUp" } as const);
-        pi.sendMessage(
-          { customType: BTW_NOTE, content: buildSaveNote(details), display: true, details },
-          options,
-        );
+        // triggerTurn:false whether idle or busy — a --save must never provoke
+        // an extra main-agent LLM turn (see buildSaveNoteDelivery).
+        const note = buildSaveNoteDelivery(details);
+        pi.sendMessage(note.message, note.options);
         notify(ctx, ctx.isIdle() ? "btw: note saved to session" : "btw: note queued", "info");
       }
     } catch (err) {
@@ -556,18 +584,30 @@ export default function btw(pi: ExtensionAPI) {
         notify(ctx, "No active BTW thread to summarize", "warning");
         return;
       }
-      const settings = await resolveSettings(ctx);
-      if (!settings) {
-        notify(ctx, "No model selected", "error");
+      // Reuse the in-flight claim: an /btw answer in flight (inFlight) or another
+      // summarize already running (widgetStatus) must turn this away, or two
+      // summaries reach the main agent — or this summarize's resetThread aborts
+      // the in-flight question and silently drops its slot.
+      if (inFlight || widgetStatus) {
+        notify(ctx, "BTW is busy — wait for the current answer or /btw:clear", "warning");
         return;
       }
-
-      widgetStatus = "⏳ summarizing...";
-      renderWidget(ctx);
+      // Claim before the first await so a second /btw:summarize (or a /btw) in
+      // the same tick cannot slip past the guard above.
+      inFlight = true;
 
       // One-off summarizer sub-session: no tools, thinking off.
       let summarizer: AgentSession | null = null;
       try {
+        const settings = await resolveSettings(ctx);
+        if (!settings) {
+          notify(ctx, "No model selected", "error");
+          return;
+        }
+
+        widgetStatus = "⏳ summarizing...";
+        renderWidget(ctx);
+
         const created = await createAgentSession({
           sessionManager: SessionManager.inMemory(ctx.cwd),
           model: settings.model,
@@ -593,6 +633,7 @@ export default function btw(pi: ExtensionAPI) {
         renderWidget(ctx);
         notify(ctx, `btw:summarize error — ${err instanceof Error ? err.message : String(err)}`, "error");
       } finally {
+        inFlight = false;
         if (summarizer) {
           try {
             await summarizer.abort();
@@ -629,6 +670,7 @@ export default function btw(pi: ExtensionAPI) {
           modelOverride = null;
           pi.appendEntry(BTW_MODEL_OVERRIDE, { timestamp: Date.now(), action: "clear" });
           disposeSession(); // next question rebuilds with inherited settings
+          cancelInFlightSlots(ctx);
           notify(ctx, "btw model: override cleared (inherits main thread)", "info");
           renderWidget(ctx);
           return;
@@ -652,6 +694,7 @@ export default function btw(pi: ExtensionAPI) {
           // Dispose but keep pendingThread: the next question reseeds a fresh
           // sub-session from the preserved hidden thread (dbachelder).
           disposeSession();
+          cancelInFlightSlots(ctx);
           notify(ctx, `btw model: ${cmd.ref.provider}/${cmd.ref.id} (override)`, "info");
           renderWidget(ctx);
           return;
@@ -677,6 +720,7 @@ export default function btw(pi: ExtensionAPI) {
           thinkingOverride = null;
           pi.appendEntry(BTW_THINKING_OVERRIDE, { timestamp: Date.now(), action: "clear" });
           disposeSession();
+          cancelInFlightSlots(ctx);
           notify(ctx, "btw thinking: override cleared (inherits main thread)", "info");
           renderWidget(ctx);
           return;
@@ -689,6 +733,7 @@ export default function btw(pi: ExtensionAPI) {
             thinkingLevel: cmd.level,
           });
           disposeSession();
+          cancelInFlightSlots(ctx);
           notify(ctx, `btw thinking: ${cmd.level} (override)`, "info");
           renderWidget(ctx);
           return;

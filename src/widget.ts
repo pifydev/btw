@@ -6,6 +6,8 @@ const MAX_VISIBLE_SLOTS = 3;
 /** Finished answers longer than this truncate with a hand-off hint (v0.2). */
 const MAX_ANSWER_LINES = 12;
 const CURSOR = " ▍";
+/** While streaming with no answer yet, show only this many trailing thinking lines. */
+const THINKING_TAIL_LINES = 3;
 
 /**
  * Pure widget renderer: WidgetState + theme -> lines.
@@ -68,8 +70,21 @@ function renderSlot(slot: BtwSlot, lines: string[], p: Painters): void {
   }
 
   if (slot.thinking) {
-    const cursor = !slot.answer && !slot.done ? p.warning(CURSOR) : "";
-    lines.push(p.dim("│ ") + p.italic(slot.thinking) + cursor);
+    // Thinking is only shown transiently. A finished exchange collapses to a
+    // one-line marker (the full reasoning is never useful above the editor and
+    // would stack dozens of wrapped lines per exchange); while streaming with no
+    // answer yet, show only the trailing lines with the cursor; once the answer
+    // starts streaming, thinking disappears and the cursor rides the answer tail.
+    if (slot.done) {
+      const count = slot.thinking.split("\n").length;
+      lines.push(p.dim(`│ 💭 thought ${count} line${count > 1 ? "s" : ""}`));
+    } else if (!slot.answer) {
+      const tail = slot.thinking.split("\n").slice(-THINKING_TAIL_LINES);
+      tail.forEach((line, i) => {
+        const cursor = i === tail.length - 1 ? p.warning(CURSOR) : "";
+        lines.push(p.dim("│ ") + p.italic(line) + cursor);
+      });
+    }
   }
 
   if (slot.error) {

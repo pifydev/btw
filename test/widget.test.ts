@@ -73,6 +73,28 @@ test("streaming cursor moves to the answer tail once text arrives", () => {
   assert.ok(!text.includes("t ▍"));
 });
 
+test("a done slot collapses long thinking to a one-line marker", () => {
+  const thinking = Array.from({ length: 50 }, (_, i) => `thought ${i + 1}`).join("\n");
+  const lines = buildWidgetLines(
+    state({ slots: [slot({ thinking, answer: "the answer", done: true })] }),
+    theme,
+  );
+  const text = lines.join("\n");
+  // The full reasoning never lands above the editor; only a count marker does.
+  assert.ok(!text.includes("thought 25"), text);
+  assert.ok(text.includes("💭 thought 50 lines"));
+  // The whole slot (border + question + marker + answer + border) stays small.
+  assert.ok(lines.length <= 8, `too many lines: ${lines.length}`);
+});
+
+test("a streaming slot shows only the tail of the thinking, not the whole block", () => {
+  const thinking = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+  const text = buildWidgetLines(state({ slots: [slot({ thinking })] }), theme).join("\n");
+  assert.ok(text.includes("line 20 ▍"));
+  assert.ok(text.includes("line 18"));
+  assert.ok(!text.includes("line 17"), text);
+});
+
 test("done slot has no cursor", () => {
   const lines = buildWidgetLines(
     state({ slots: [slot({ answer: "final", done: true })] }),
