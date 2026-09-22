@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import { BTW_NOTE } from "../src/persistence.ts";
-import { buildSeedMessages } from "../src/seed.ts";
+import { buildSeedMessages, isSeedableBranchMessage } from "../src/seed.ts";
 import type { LooseMessage } from "../src/types.ts";
 
 // The shape buildSessionContext hands back: real AgentMessages, including a
@@ -30,12 +30,43 @@ test("convertToLlm maps custom→user and drops customType, so a post-conversion
 });
 
 test("filtering btw-notes before convertToLlm keeps them out of the contextual seed", () => {
-  const filtered = branchMessages.filter(
-    (m) => (m as { customType?: string }).customType !== BTW_NOTE,
-  );
+  const filtered = branchMessages.filter((m) => isSeedableBranchMessage(m, BTW_NOTE));
   const main = convertToLlm(filtered as never) as unknown as LooseMessage[];
   const seed = buildSeedMessages(main, [], "contextual", { id: "m", provider: "p" });
   assert.ok(!JSON.stringify(seed).includes("saved thing?"), JSON.stringify(seed));
   // the real user turn is still seeded
   assert.ok(JSON.stringify(seed).includes("real question"));
+});
+
+// pi 0.87 persists the system prompt as a leading role:"system" message on
+// the branch and convertToLlm no longer drops it (messages.ts `case "system"`),
+// so a contextual seed built from the branch would carry the parent's entire
+// system prompt + tool schemas into the four-tool side session.
+const branchWithSystem = [
+  {
+    role: "system",
+    content: "",
+    sections: { main: "PARENT SYSTEM PROMPT" },
+    toolsAdded: [{ name: "bash", description: "run", parameters: {} }],
+    timestamp: 0,
+  },
+  ...branchMessages,
+];
+
+test("convertToLlm on pi 0.87 passes role:system through", () => {
+  const converted = convertToLlm(branchWithSystem as never) as unknown as LooseMessage[];
+  assert.ok(
+    converted.some((m) => (m as { role?: string }).role === "system"),
+    "the leading system message survives conversion, so the seed filter must drop it",
+  );
+});
+
+test("filtering role:system before convertToLlm keeps the parent prompt out of the contextual seed", () => {
+  const filtered = branchWithSystem.filter((m) => isSeedableBranchMessage(m, BTW_NOTE));
+  const main = convertToLlm(filtered as never) as unknown as LooseMessage[];
+  const seed = buildSeedMessages(main, [], "contextual", { id: "m", provider: "p" });
+  const text = JSON.stringify(seed);
+  assert.ok(!text.includes("PARENT SYSTEM PROMPT"), text);
+  assert.ok(!seed.some((m) => (m as { role?: string }).role === "system"));
+  assert.ok(text.includes("real question"));
 });

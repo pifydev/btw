@@ -36,6 +36,22 @@ function assistantMessage(text: string, model: SeedModelRef): LooseMessage {
 }
 
 /**
+ * Which main-branch AgentMessages may enter a contextual seed. Runs BEFORE
+ * convertToLlm, because conversion erases the two markers this needs:
+ * - role "custom" becomes a plain user message and customType is dropped, so
+ *   saved --save notes (BTW_NOTE) can only be recognised here;
+ * - pi 0.87 persists the system prompt as a leading role:"system" message and
+ *   convertToLlm now passes it through (messages.ts `case "system"`), so
+ *   without this the side session would be seeded with the parent's entire
+ *   system prompt and tool schemas on top of its own four-tool prompt.
+ */
+export function isSeedableBranchMessage(message: unknown, noteType: string): boolean {
+  const m = message as { role?: string; customType?: string } | null;
+  if (!m) return false;
+  return m.customType !== noteType && m.role !== "system";
+}
+
+/**
  * Prepare the main-session messages for seeding a contextual btw sub-session:
  * drop a trailing in-progress assistant message (stopReason missing) so a fork
  * mid-stream never sees a truncated response (linioi).

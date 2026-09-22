@@ -42,7 +42,7 @@ import {
   replayBranch,
 } from "../src/persistence.ts";
 import { sanitizeAnswer } from "../src/sanitize.ts";
-import { buildSeedMessages } from "../src/seed.ts";
+import { buildSeedMessages, isSeedableBranchMessage } from "../src/seed.ts";
 import type {
   BtwDetails,
   BtwMode,
@@ -322,15 +322,12 @@ export default function btw(pi: ExtensionAPI) {
     const mainMessages =
       mode === "contextual"
         ? (convertToLlm(
-            // Drop saved --save notes BEFORE conversion: convertToLlm maps
-            // role "custom" to a plain user message and does not copy customType
-            // (messages.js ~89-95), so a filter run on the converted output can
-            // never match — every contextual side session would otherwise be
-            // seeded with the side channel's own prior notes.
+            // Filter BEFORE conversion (see isSeedableBranchMessage): saved
+            // --save notes lose their customType in convertToLlm, and on pi
+            // 0.87 the parent's persisted system prompt would otherwise pass
+            // straight through into the side session's seed.
             buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId())
-              .messages.filter(
-                (m) => (m as { customType?: string }).customType !== BTW_NOTE,
-              ),
+              .messages.filter((m) => isSeedableBranchMessage(m, BTW_NOTE)),
           ) as unknown as LooseMessage[])
         : [];
     const seed = buildSeedMessages(mainMessages, pendingThread, mode, {
