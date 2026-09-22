@@ -164,6 +164,92 @@ test("/btw:summarize refuses while another summarize is already in flight", asyn
   assert.equal(busy.length, 1, host.notifications().join(" | "));
 });
 
+/** A stubbed streamSimple whose .result() resolves to one scripted message. */
+function scriptedStream(result: {
+  content?: Array<{ type?: string; text?: string }>;
+  stopReason?: string;
+  errorMessage?: string;
+}) {
+  return () => ({ result: async () => result });
+}
+
+test("/btw:summarize delivers the model's summary and resets the thread", async () => {
+  // The summarizer now runs through ctx.modelRegistry.streamSimple, stubbed
+  // here to return a plain text answer — the same delivery + reset the old
+  // createAgentSession path produced, now with no session to build or dispose.
+  const host = load({
+    streamSimple: scriptedStream({ content: [{ type: "text", text: "SUMMARY TEXT" }], stopReason: "stop" }),
+  });
+  host.entries.push(exchange("q", "a"));
+  await host.fire("session_start");
+
+  await host.run("btw:summarize", "keep it short");
+
+  const delivered = host.userMessages.at(-1)!;
+  assert.ok(delivered.includes("<btw-summary>"), delivered);
+  assert.ok(delivered.includes("SUMMARY TEXT"), delivered);
+  assert.ok(delivered.includes("keep it short"), delivered);
+  assert.equal(host.widget("btw"), null, "thread should reset after a summary");
+  assert.match(host.notifications().at(-1)!, /injected summary of 1 exchange/);
+});
+
+test("/btw:summarize reports a stopReason 'error' result and keeps the thread", async () => {
+  // An in-stream failure resolves with stopReason "error"; it must reach the
+  // handler's catch exactly like the old contentText() error check did — error
+  // notify, nothing delivered, thread preserved for a retry.
+  const host = load({
+    streamSimple: scriptedStream({ content: [], stopReason: "error", errorMessage: "provider exploded" }),
+  });
+  host.entries.push(exchange("q", "the answer"));
+  await host.fire("session_start");
+
+  await host.run("btw:summarize");
+
+  assert.equal(host.userMessages.length, 0, "nothing should be delivered on error");
+  assert.match(host.notifications().at(-1)!, /btw:summarize error/);
+  assert.ok(host.notifications().at(-1)!.includes("provider exploded"), host.notifications().join(" | "));
+  assert.ok(host.widgetText("btw").includes("the answer"), "thread preserved for retry");
+  assert.equal(host.entriesOf(BTW_RESET).length, 0, "thread must not be reset on failure");
+});
+
+test("/btw:summarize reports an aborted (timeout) result and keeps the thread", async () => {
+  // The deadline is an AbortSignal.timeout, and a fired signal ends the stream
+  // with stopReason "aborted" — the summarizer's timeout path. Same outcome as
+  // the error case: reported, not delivered, thread kept.
+  const host = load({
+    streamSimple: scriptedStream({ content: [], stopReason: "aborted", errorMessage: "request timed out" }),
+  });
+  host.entries.push(exchange("q", "the answer"));
+  await host.fire("session_start");
+
+  await host.run("btw:summarize");
+
+  assert.equal(host.userMessages.length, 0, "nothing should be delivered on abort");
+  assert.match(host.notifications().at(-1)!, /btw:summarize error/);
+  assert.ok(host.widgetText("btw").includes("the answer"), "thread preserved for retry");
+  assert.equal(host.entriesOf(BTW_RESET).length, 0, "thread must not be reset on failure");
+});
+
+test("/btw:summarize reports a synchronous streamSimple throw and keeps the thread", async () => {
+  // streamSimple may throw synchronously when request auth is missing, before a
+  // stream exists. That rejection lands in the same catch as any other failure.
+  const host = load({
+    streamSimple: () => {
+      throw new Error('No API key found for "openai"');
+    },
+  });
+  host.entries.push(exchange("q", "the answer"));
+  await host.fire("session_start");
+
+  await host.run("btw:summarize");
+
+  assert.equal(host.userMessages.length, 0, "nothing should be delivered when the call throws");
+  assert.match(host.notifications().at(-1)!, /btw:summarize error/);
+  assert.ok(host.notifications().at(-1)!.includes("No API key"), host.notifications().join(" | "));
+  assert.ok(host.widgetText("btw").includes("the answer"), "thread preserved for retry");
+  assert.equal(host.entriesOf(BTW_RESET).length, 0, "thread must not be reset on failure");
+});
+
 test("/btw:thinking persists across a reload", async () => {
   const host = load();
   await host.run("btw:thinking", "low");

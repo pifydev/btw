@@ -35,6 +35,25 @@ export interface StubModel {
   contextWindow?: number;
 }
 
+/** The final AssistantMessage a stubbed streamSimple resolves through .result(). */
+export interface StubStreamResult {
+  content?: Array<{ type?: string; text?: string }>;
+  stopReason?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Stub for ctx.modelRegistry.streamSimple: called with (model, context,
+ * options), it returns a stream whose .result() resolves to a scripted
+ * AssistantMessage. To reproduce the synchronous auth throw streamSimple can
+ * raise before a stream exists, a stub may simply `throw` from this function.
+ */
+export type StubStreamSimple = (
+  model: StubModel,
+  context: unknown,
+  options: unknown,
+) => { result: () => Promise<StubStreamResult> };
+
 export interface StubOptions {
   cwd?: string;
   model?: StubModel | null;
@@ -42,6 +61,8 @@ export interface StubOptions {
   registry?: Record<string, StubModel>;
   /** Registry keys that have usable credentials. */
   credentialed?: string[];
+  /** Stub for modelRegistry.streamSimple (the /btw:summarize model call). */
+  streamSimple?: StubStreamSimple;
   hasUI?: boolean;
   thinkingLevel?: string;
   /** ExtensionContext.mode in the real host: tui | rpc | json | print. */
@@ -129,6 +150,11 @@ export class StubHost {
           credentialed.has(`${model.provider}/${model.id}`)
             ? { ok: true as const, apiKey: "k" }
             : { ok: false as const },
+        streamSimple:
+          this.opts.streamSimple ??
+          (() => {
+            throw new Error("streamSimple not stubbed for this test");
+          }),
       },
       sessionManager: {
         getBranch: () => this.entries,

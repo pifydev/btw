@@ -74,7 +74,54 @@ const BTW_SYSTEM_PROMPT = [
 const BTW_SUMMARIZE_SYSTEM_PROMPT =
   "You summarize side conversations. Output only the summary, no preamble.";
 
+/**
+ * Ceiling for the one-shot summarizer call. The old path used a timer that
+ * called session.abort() because prompt() ignored signals; streamSimple takes
+ * a real AbortSignal, so the deadline is just AbortSignal.timeout(this). Two
+ * minutes is generous for a single no-tools summary of a short side thread and
+ * still bounds a wedged provider — a timeout arrives as a stopReason "aborted"
+ * result, handled exactly like any other summarizer failure.
+ */
+const SUMMARIZE_TIMEOUT_MS = 120_000;
+
 type UiContext = ExtensionContext | ExtensionCommandContext;
+
+/**
+ * One-shot summarizer model call over `ctx.modelRegistry.streamSimple`.
+ *
+ * This replaces a full createAgentSession round-trip (loader + reload +
+ * in-memory session + subscribe + dispose + abort timer) for a tool-less "ask
+ * the model one question" call. streamSimple resolves auth at request time —
+ * including providers other extensions registered, which the old
+ * createAgentSession runtime could not see — and both failure modes surface
+ * here uniformly: a synchronous auth throw rejects this promise (into the
+ * handler's existing catch), while an in-stream error/aborted/empty result
+ * resolves with that `stopReason`/`errorMessage` for the caller to classify.
+ * Kept as a pure seam so a test drives it by stubbing `modelRegistry.streamSimple`.
+ */
+async function callModel(
+  ctx: UiContext,
+  model: Parameters<ExtensionContext["modelRegistry"]["streamSimple"]>[0],
+  context: { systemPrompt: string; messages: Array<{ role: "user"; content: string }> },
+  options: { signal: AbortSignal },
+): Promise<{ text: string; stopReason: unknown; errorMessage?: string }> {
+  // `context as never`: the pi Context type wants full Message objects, but the
+  // summarizer only ever sends one plain user turn; normalizeContext folds the
+  // systemPrompt into a leading system message and passes the rest through.
+  const stream = ctx.modelRegistry.streamSimple(model, context as never, options);
+  const message = (await stream.result()) as {
+    content?: Array<{ type?: string; text?: string }>;
+    stopReason?: unknown;
+    errorMessage?: string;
+  };
+  let text = "";
+  for (const part of message.content ?? []) {
+    if (part.type === "text" && typeof part.text === "string") text += part.text;
+  }
+  // Same sanitizing the old contentText() applied, so a model narrating a fake
+  // edit never reaches the main agent through a summary.
+  return { text: sanitizeAnswer(text), stopReason: message.stopReason, errorMessage: message.errorMessage };
+}
 
 interface ActiveSession {
   session: AgentSession;
@@ -596,8 +643,6 @@ export default function btw(pi: ExtensionAPI) {
       // the same tick cannot slip past the guard above.
       inFlight = true;
 
-      // One-off summarizer sub-session: no tools, thinking off.
-      let summarizer: AgentSession | null = null;
       try {
         const settings = await resolveSettings(ctx);
         if (!settings) {
@@ -608,24 +653,26 @@ export default function btw(pi: ExtensionAPI) {
         widgetStatus = "⏳ summarizing...";
         renderWidget(ctx);
 
-        const created = await createAgentSession({
-          sessionManager: SessionManager.inMemory(ctx.cwd),
-          model: settings.model,
-          thinkingLevel: "off" as never,
-          tools: [],
-          resourceLoader: await makeResourceLoader(ctx, [BTW_SUMMARIZE_SYSTEM_PROMPT]),
-        });
-        summarizer = created.session;
-        await summarizer.prompt(buildSummarizePrompt(pendingThread), {
-          source: "extension",
-        } as never);
-        const result = contentText(summarizer);
-        if (!result.answer || result.stopReason === "error" || result.stopReason === "aborted") {
-          throw new Error(result.answer || "summarizer returned no text");
+        // One-shot summarizer: no tools, no reasoning (the old call used thinking
+        // "off"), bounded by a real AbortSignal instead of a session + abort timer.
+        const result = await callModel(
+          ctx,
+          settings.model,
+          {
+            systemPrompt: BTW_SUMMARIZE_SYSTEM_PROMPT,
+            messages: [{ role: "user", content: buildSummarizePrompt(pendingThread) }],
+          },
+          { signal: AbortSignal.timeout(SUMMARIZE_TIMEOUT_MS) },
+        );
+        // Error, timeout (stopReason "aborted"), or an empty answer all throw
+        // into the catch below: same outcome as before — thread and widget kept
+        // for retry, error notify, no delivery.
+        if (!result.text || result.stopReason === "error" || result.stopReason === "aborted") {
+          throw new Error(result.text || result.errorMessage || "summarizer returned no text");
         }
 
         const count = pendingThread.length;
-        deliver(ctx, buildSummaryContent(result.answer, (args ?? "").trim()));
+        deliver(ctx, buildSummaryContent(result.text, (args ?? "").trim()));
         resetThread(ctx, "contextual");
         notify(ctx, `btw → main: injected summary of ${count} exchange${count > 1 ? "s" : ""}`, "info");
       } catch (err) {
@@ -634,18 +681,6 @@ export default function btw(pi: ExtensionAPI) {
         notify(ctx, `btw:summarize error — ${err instanceof Error ? err.message : String(err)}`, "error");
       } finally {
         inFlight = false;
-        if (summarizer) {
-          try {
-            await summarizer.abort();
-          } catch {
-            // idle abort may fail; ignore
-          }
-          try {
-            summarizer.dispose();
-          } catch {
-            // double-dispose is fine
-          }
-        }
       }
     },
   });
