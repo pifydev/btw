@@ -9,8 +9,16 @@ import type { BtwDetails } from "./types.ts";
  * neutralizeBlockTags exists for, and a side thread can quote anything,
  * including text from a repository that wrote a closing tag on purpose.
  */
+const RESERVED_TAGS = /<(\/?)(system-reminder|system|human|assistant|user)(\s[^>]*)?>/gi;
+
 function neutralizeTags(text: string, tag: string): string {
-  return text.replaceAll(new RegExp(`<(/?)${tag}(\\s[^>]*)?>`, "gi"), "&lt;$1" + tag + "$2&gt;");
+  return (
+    text
+      .replaceAll(new RegExp(`<(/?)${tag}(\\s[^>]*)?>`, "gi"), "&lt;$1" + tag + "$2&gt;")
+      // The side thread quoted a codebase; what it quotes must not be able
+      // to read as the harness talking (a system-reminder is trusted framing).
+      .replaceAll(RESERVED_TAGS, "&lt;$1$2$3&gt;")
+  );
 }
 
 /** Format the thread as User/Assistant exchanges (noahsaso format). */
