@@ -43,6 +43,7 @@ import {
 } from "../src/persistence.ts";
 import { sanitizeAnswer } from "../src/sanitize.ts";
 import { buildSeedMessages, isSeedableBranchMessage } from "../src/seed.ts";
+import { resolveChildModel } from "../src/child-model.ts";
 import type {
   BtwDetails,
   BtwMode,
@@ -228,6 +229,14 @@ export default function btw(pi: ExtensionAPI) {
     }
 
     if (!model) return null;
+    // pi 0.99: the side thread is a child session, and a virtual selection
+    // cannot drive one; take the physical model the host last routed to.
+    const resolved = resolveChildModel(model as never, ctx.sessionManager.getBranch() as unknown[], (p, i) => ctx.modelRegistry.find(p, i) as never);
+    if (!resolved.ok) {
+      notify(ctx, `btw: ${resolved.reason}`, "error");
+      return null;
+    }
+    model = resolved.model as typeof model;
     const thinkingLevel = thinkingOverride ?? (pi.getThinkingLevel() as BtwThinkingLevel);
     return { model, thinkingLevel, overrideFellBack };
   }
